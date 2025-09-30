@@ -1,15 +1,20 @@
-FROM node:18-alpine
+# Imagen estable y compatible
+FROM node:18-bullseye-slim
 
 WORKDIR /app
 
-# instala dependencias sólo de producción
+# Solo copiamos los manifests primero para cachear instalación
 COPY package*.json ./
-RUN npm ci --omit=dev
+
+# Instala deps de producción (evita fallos por lockfile)
+RUN npm install --omit=dev
 
 # Copia el resto del código
 COPY . .
 
 ENV NODE_ENV=production
+ENV PORT=3000
+
 EXPOSE 3000
 
 CMD ["npm", "start"]
