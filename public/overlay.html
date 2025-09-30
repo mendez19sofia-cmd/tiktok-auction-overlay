@@ -2,15 +2,76 @@
 <html>
 <head>
   <meta charset="utf-8" />
-  <title>TikTok Auction Overlay</title>
+  <title>Subasta en Vivo</title>
   <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <style>
+    html,body{margin:0;padding:0;background:transparent;font-family:Inter,system-ui,Segoe UI,Arial,sans-serif;color:#dfe3f7}
+    .wrap{width:100vw;height:100vh;display:flex;align-items:center;justify-content:center}
+    .card{width:min(460px,94vw);background:linear-gradient(180deg,#0c1324,#0a0f1c);border-radius:18px;padding:14px;border:1px solid rgba(255,255,255,.08);box-shadow:0 12px 30px rgba(0,0,0,.45)}
+    .timer{height:68px;border-radius:14px;background:rgba(8,14,28,.9);border:1px solid rgba(100,255,230,.18);display:flex;align-items:center;justify-content:center;margin-bottom:12px;position:relative;overflow:hidden}
+    .timer::after{content:"";position:absolute;inset:0;border-radius:14px;box-shadow:0 0 22px rgba(0,255,255,.25) inset}
+    .digits{font-variant-numeric:tabular-nums;font-size:44px;font-weight:900;letter-spacing:2px;color:#7ff6ff;text-shadow:0 0 12px rgba(0,255,255,.5)}
+    .muted{color:#9aa3c5;font-size:12px;text-align:center;margin-bottom:8px}
+    .grid{background:rgba(5,10,22,.7);border:1px solid rgba(255,255,255,.06);border-radius:14px;min-height:140px;padding:8px}
+    .row{display:flex;align-items:center;justify-content:space-between;padding:8px 10px;border-radius:10px}
+    .row + .row{margin-top:6px}
+    .row:nth-child(1){background:linear-gradient(90deg, rgba(0,255,255,.12), rgba(255,255,255,0))}
+    .user{display:flex;align-items:center;gap:8px;font-weight:800}
+    .pos{display:inline-flex;align-items:center;justify-content:center;width:26px;height:26px;border-radius:50%;background:rgba(255,255,255,.08);font-size:13px}
+    .coins{font-weight:900;color:#aefb6a}
+    .foot{display:flex;justify-content:space-between;align-items:center;margin-top:10px;font-size:12px;color:#9aa3c5}
+    .pill{background:rgba(255,255,255,.08);padding:6px 10px;border-radius:999px}
+  </style>
 </head>
 <body>
-  <h1 style="color:white;">Overlay listo con TTS y sonidos 🎤🔊</h1>
-  <script src="/socket.io/socket.io.js"></script>
-  <script>
-    const ioClient = io();
-    ioClient.on("state", (snap)=>console.log("state",snap));
-  </script>
+<div class="wrap">
+  <div class="card">
+    <div class="timer"><div class="digits" id="timer">00:00</div></div>
+    <div class="muted">
+      Ronda <b id="round">#1</b> • Delay stream: <b id="delay">10</b>s • Cada 10 coins: +<b id="ext">3</b>s
+    </div>
+    <div class="grid" id="board"><div class="muted" style="padding:20px;">No hay donaciones aún. La subasta comenzará cuando se inicie.</div></div>
+    <div class="foot">
+      <div class="pill">Estado: <span id="status">PAUSA</span></div>
+      <div class="pill"><span id="cfg"></span></div>
+    </div>
+  </div>
+</div>
+
+<script src="/socket.io/socket.io.js"></script>
+<script>
+  const pad=n=>String(n).padStart(2,"0");
+  const fmt=s=>`${pad(Math.floor(s/60))}:${pad(s%60)}`;
+  const $=id=>document.getElementById(id);
+  const ioClient = io();
+
+  function renderBoard(bidders){
+    const board=$("board"); board.innerHTML="";
+    if(!bidders.length){
+      board.innerHTML = '<div class="muted" style="padding:20px;">No hay donaciones aún. La subasta comenzará cuando se inicie.</div>';
+      return;
+    }
+    bidders.slice(0,6).forEach((b,idx)=>{
+      const row=document.createElement("div");
+      row.className="row";
+      row.innerHTML = `<div class="user"><span class="pos">${idx+1}</span> ${b.user}</div><div class="coins">🟡 ${b.coins}</div>`;
+      board.appendChild(row);
+    });
+  }
+
+  ioClient.on("state", (snap) => {
+    $("timer").textContent = fmt(snap.secondsLeft);
+    $("round").textContent = `#${snap.round}`;
+    $("delay").textContent = snap.delaySeconds;
+    $("ext").textContent = snap.cfg?.auctionSeconds ? snap.cfg.extendPer10 : 3;
+    $("status").textContent = snap.running ? "EN VIVO" : "PAUSA";
+    $("cfg").textContent = `Tiempo: ${snap.cfg?.auctionSeconds || 20}s`;
+    renderBoard(snap.bidders);
+  });
+
+  ioClient.on("gift", (g) => {
+    // aquí podrías disparar sonido/TTS si quieres
+  });
+</script>
 </body>
 </html>
