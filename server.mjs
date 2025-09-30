@@ -1,20 +1,27 @@
+// --- al inicio:
 import express from "express";
 import http from "http";
 import { Server as SocketIOServer } from "socket.io";
 import { WebcastPushConnection } from "tiktok-live-connector";
 
 const PORT = process.env.PORT || 3000;
-const AUCTION_SECONDS = Number(process.env.AUCTION_SECONDS || 20);
-const EXTEND_PER_10_COINS = Number(process.env.EXTEND_PER_10_COINS || 3);
-const STREAM_DELAY_SECONDS = Number(process.env.STREAM_DELAY_SECONDS || 10);
-const LIVE_USERNAME = process.env.TIKTOK_USER || "snakez16x";
+
+// Config “viva” editable desde /admin:
+const config = {
+  auctionSeconds: Number(process.env.AUCTION_SECONDS || 20),
+  extendPer10:   Number(process.env.EXTEND_PER_10_COINS || 3),
+  streamDelay:   Number(process.env.STREAM_DELAY_SECONDS || 10),
+  tiktokUser:    process.env.TIKTOK_USER || "snakez16x",
+};
 
 const app = express();
+app.use(express.json());           // <— para API /api/config
+app.use(express.static("public"));
+
 const server = http.createServer(app);
 const io = new SocketIOServer(server, { cors: { origin: "*" } });
 
-app.use(express.static("public"));
-
+// --- estado de subasta:
 let state = {
   round: 1,
   running: false,
@@ -22,23 +29,24 @@ let state = {
   bidders: new Map(),
 };
 
+// helpers
 function resetRound() {
   if (state.running) state.round += 1;
   state.running = true;
   state.bidders.clear();
-  state.endsAt = Date.now() + AUCTION_SECONDS * 1000;
+  state.endsAt = Date.now() + config.auctionSeconds * 1000;
   tickLoop();
   broadcast();
 }
 
 function extendByCoins(coins) {
-  const extra = Math.floor(coins / 10) * EXTEND_PER_10_COINS;
+  const extra = Math.floor(coins / 10) * config.extendPer10;
   if (extra > 0) state.endsAt += extra * 1000;
 }
 
 function snapshot() {
   const now = Date.now();
-  const secondsLeft = Math.max(0, Math.ceil((state.endsAt - now) / 1000));
+  const secondsLeft = state.running ? Math.max(0, Math.ceil((state.endsAt - now) / 1000)) : 0;
   const bidders = [...state.bidders.entries()]
     .map(([user, data]) => ({ user, ...data }))
     .sort((a, b) => b.coins - a.coins);
@@ -47,23 +55,20 @@ function snapshot() {
     round: state.round,
     running: state.running,
     secondsLeft,
-    delaySeconds: STREAM_DELAY_SECONDS,
-    bidders
+    delaySeconds: config.streamDelay,
+    bidders,
+    cfg: { auctionSeconds: config.auctionSeconds, extendPer10: config.extendPer10 }
   };
 }
 
-function broadcast() {
-  io.emit("state", snapshot());
-}
+function broadcast() { io.emit("state", snapshot()); }
 
 let ticking = false;
 function tickLoop() {
-  if (ticking) return;
-  ticking = true;
+  if (ticking) return; ticking = true;
   const loop = () => {
     if (!state.running) { ticking = false; return; }
-    const now = Date.now();
-    if (now >= state.endsAt) {
+    if (Date.now() >= state.endsAt) {
       state.running = false;
       const snap = snapshot();
       const winner = snap.bidders[0] || null;
@@ -89,6 +94,7 @@ function onGift({ username, coins, raw = null }) {
   broadcast();
 }
 
+// --- rutas existentes:
 app.get("/gift", (req, res) => {
   const u = req.query.user || "demo_user";
   const c = Number(req.query.coins || 10);
@@ -100,20 +106,30 @@ app.get("/overlay", (req, res) => {
   res.sendFile(process.cwd() + "/public/overlay.html");
 });
 
+// --- NUEVO: API de configuración runtime (/admin la usa)
+app.get("/api/config", (req, res) => res.json(config));
+
+app.post("/api/config", (req, res) => {
+  const { auctionSeconds, extendPer10, streamDelay } = req.body || {};
+  if (Number.isFinite(auctionSeconds) && auctionSeconds > 0) config.auctionSeconds = Math.floor(auctionSeconds);
+  if (Number.isFinite(extendPer10)   && extendPer10   >= 0) config.extendPer10   = Math.floor(extendPer10);
+  if (Number.isFinite(streamDelay)   && streamDelay   >= 0) config.streamDelay   = Math.floor(streamDelay);
+  // si la ronda está corriendo y cambias auctionSeconds, no reiniciamos; aplica en siguiente reset
+  io.emit("config_updated", config);
+  res.json({ ok: true, config });
+});
+
+// home bonito (opcional)
+app.get("/", (req, res) => {
+  res.send("✅ TikTok Auction Overlay online | usa /overlay, /admin, /gift");
+});
+
+// conexión a TikTok (igual que tenías, usando config.tiktokUser)
 async function connectTikTok() {
-  const tiktok = new WebcastPushConnection(LIVE_USERNAME, {
-    enableExtendedGiftInfo: true
-  });
+  const tiktok = new WebcastPushConnection(config.tiktokUser, { enableExtendedGiftInfo: true });
 
-  tiktok.on("streamEnd", () => {
-    console.log("🔴 Live finalizado o conexión cerrada. Reintentando en 15s…");
-    setTimeout(connectTikTok, 15000);
-  });
-
-  tiktok.on("disconnected", () => {
-    console.log("⚠️ Desconectado. Reintento en 10s…");
-    setTimeout(connectTikTok, 10000);
-  });
+  tiktok.on("streamEnd", () => { console.log("🔴 Live finalizado. Reintento 15s"); setTimeout(connectTikTok, 15000); });
+  tiktok.on("disconnected", () => { console.log("⚠️ Desconectado. Reintento 10s"); setTimeout(connectTikTok, 10000); });
 
   tiktok.on("gift", (data) => {
     try {
@@ -121,30 +137,22 @@ async function connectTikTok() {
       let coins = 0;
       if (data?.giftType === 1) {
         if (!data?.repeatEnd) return;
-        if (data?.gift && typeof data?.repeatCount === "number") {
+        if (data?.gift && typeof data?.repeatCount === "number")
           coins = (data.gift.diamondCost || 0) * data.repeatCount;
-        } else if (typeof data?.diamondCount === "number") {
-          coins = data.diamondCount;
-        }
+        else if (typeof data?.diamondCount === "number") coins = data.diamondCount;
       } else {
-        if (typeof data?.diamondCount === "number" && data.diamondCount > 0) {
-          coins = data.diamondCount;
-        } else if (data?.gift) {
-          coins = data.gift.diamondCost || 0;
-        }
+        if (typeof data?.diamondCount === "number" && data.diamondCount > 0) coins = data.diamondCount;
+        else if (data?.gift) coins = data.gift.diamondCost || 0;
       }
       if (coins > 0) onGift({ username, coins, raw: data });
-    } catch (e) {
-      console.error("Error parseando gift:", e);
-    }
+    } catch (e) { console.error("gift parse:", e); }
   });
 
   try {
     const room = await tiktok.connect();
-    console.log(`✅ Conectado al Live de @${LIVE_USERNAME}`);
-    console.log(`RoomId: ${room.roomIdStr} | Viewers: ${room.viewerCount}`);
+    console.log(`✅ Conectado al Live de @${config.tiktokUser} | Room ${room.roomIdStr}`);
   } catch (err) {
-    console.error("❌ No se pudo conectar al Live:", err?.message || err);
+    console.log("❌ No se pudo conectar al Live:", err?.message || err);
     setTimeout(connectTikTok, 20000);
   }
 }
