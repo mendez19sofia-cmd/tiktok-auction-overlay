@@ -1,0 +1,109 @@
+// ======== TEST / ADMIN ========
+
+// Pequeña página de controles
+app.get("/admin", (req, res) => {
+  res.send(`
+<!doctype html><html><head><meta charset="utf-8"/>
+<title>Admin Subasta</title>
+<style>
+body{font-family:system-ui,Arial;margin:20px;background:#0b0d12;color:#fff}
+h1{margin:0 0 10px}
+.grid{display:grid;grid-template-columns:repeat(2, minmax(220px, 1fr));gap:10px;max-width:520px}
+.btn{padding:12px 14px;border-radius:10px;border:0;font-weight:800;cursor:pointer}
+.ok{background:#57ff99;color:#000} .warn{background:#ffd000;color:#000}
+.danger{background:#ff3355;color:#fff} .muted{background:#303443;color:#fff}
+input{padding:10px;border-radius:8px;border:1px solid #2b2f3b;background:#151821;color:#fff;width:100%}
+.row{display:flex;gap:8px}
+</style>
+</head><body>
+  <h1>Admin Subasta</h1>
+  <div class="grid">
+    <button class="btn ok" onclick="startRain()">💥 Lluvia de regalos</button>
+    <button class="btn danger" onclick="stopRain()">⛔ Parar lluvia</button>
+
+    <div class="row">
+      <input id="user" placeholder="usuario" value="Tester"/>
+      <input id="coins" type="number" min="1" step="1" value="10"/>
+    </div>
+    <button class="btn warn" onclick="sendGift()">➕ Enviar gift manual</button>
+
+    <button class="btn muted" onclick="ping()">📡 Ver estado</button>
+  </div>
+
+  <pre id="log"></pre>
+
+<script>
+let rainTimer=null;
+const base = location.origin;
+
+function log(t){ document.getElementById('log').textContent = t + "\\n" + document.getElementById('log').textContent; }
+
+async function sendGift(){
+  const u = document.getElementById('user').value || "Tester";
+  const c = Number(document.getElementById('coins').value||10);
+  const r = await fetch(\`\${base}/gift?user=\${encodeURIComponent(u)}&coins=\${c}\`);
+  log("Gift enviado: " + u + " +" + c);
+}
+
+function randName(){
+  const names=["Ana","Luis","Mia","Alex","Rafa","Sofi","Leo","Nico","Vale","Dani","Gaby","Tomi"];
+  return names[Math.floor(Math.random()*names.length)] + Math.floor(Math.random()*100);
+}
+
+async function rainOnce(){
+  // simula 3-6 gifts por ronda con montos variados
+  const n = 3 + Math.floor(Math.random()*4);
+  for(let i=0;i<n;i++){
+    const u = randName();
+    const c = [5,10,15,20,30,50,80,100][Math.floor(Math.random()*8)];
+    await fetch(\`\${base}/gift?user=\${u}&coins=\${c}\`);
+    await new Promise(r=>setTimeout(r, 500 + Math.random()*900));
+  }
+}
+
+function startRain(){
+  if(rainTimer) return;
+  log("Lluvia iniciada");
+  rainTimer = setInterval(rainOnce, 2500);
+  rainOnce();
+}
+
+function stopRain(){
+  if(!rainTimer) return;
+  clearInterval(rainTimer); rainTimer=null;
+  log("Lluvia detenida");
+}
+
+async function ping(){
+  const r = await fetch(\`\${base}/overlay\`);
+  log("Overlay responde: " + r.status);
+}
+</script>
+</body></html>
+  `);
+});
+
+// Endpoints simples para iniciar/parar “lluvia” desde URL
+let _rainInterval = null;
+
+app.get("/test/boom", async (req, res) => {
+  if (_rainInterval) return res.json({ok:true, msg:"ya estaba corriendo"});
+  const pace = Number(req.query.ms || 2500); // cada cuánto “oleadas”
+  _rainInterval = setInterval(async () => {
+    // misma lógica que rainOnce()
+    const n = 3 + Math.floor(Math.random()*4);
+    for (let i=0;i<n;i++) {
+      const names=["Ana","Luis","Mia","Alex","Rafa","Sofi","Leo","Nico","Vale","Dani","Gaby","Tomi"];
+      const u = names[Math.floor(Math.random()*names.length)] + Math.floor(Math.random()*100);
+      const coins=[5,10,15,20,30,50,80,100][Math.floor(Math.random()*8)];
+      await fetch(`${req.protocol}://${req.get('host')}/gift?user=${encodeURIComponent(u)}&coins=${coins}`).catch(()=>{});
+    }
+  }, pace);
+  res.json({ok:true, msg:"lluvia iniciada", pace_ms:pace});
+});
+
+app.get("/test/stop", (req, res) => {
+  if (_rainInterval) clearInterval(_rainInterval);
+  _rainInterval = null;
+  res.json({ok:true, msg:"lluvia detenida"});
+});
