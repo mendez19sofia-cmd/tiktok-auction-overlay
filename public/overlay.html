@@ -1,0 +1,16 @@
+<!doctype html>
+<html>
+<head>
+  <meta charset="utf-8" />
+  <title>TikTok Auction Overlay</title>
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+</head>
+<body>
+  <h1 style="color:white;">Overlay listo con TTS y sonidos 🎤🔊</h1>
+  <script src="/socket.io/socket.io.js"></script>
+  <script>
+    const ioClient = io();
+    ioClient.on("state", (snap)=>console.log("state",snap));
+  </script>
+</body>
+</html>
