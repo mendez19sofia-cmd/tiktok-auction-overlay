@@ -1,0 +1,32 @@
+<!doctype html><html><head><meta charset="utf-8"/><title>Admin</title>
+<style>
+body{font-family:system-ui,Arial;background:#0b0f1d;color:#e5e9ff;margin:20px}
+h1{margin:0 0 10px}
+.card{max-width:520px;background:#0f1529;border:1px solid #2b3350;border-radius:14px;padding:16px}
+.row{display:flex;gap:10px;margin-bottom:8px}
+input{flex:1;padding:10px;border-radius:10px;border:1px solid #2b3350;background:#121a33;color:#fff}
+.btn{padding:10px 14px;border-radius:10px;border:0;background:#57ff99;color:#000;font-weight:900;cursor:pointer}
+.small{font-size:12px;color:#9aa3c5}
+</style></head><body>
+<h1>Admin de Subasta</h1>
+<div class="card">
+  <div class="row"><input id="auctionSeconds" type="number" min="5" step="1" placeholder="Tiempo por ronda (s)"></div>
+  <div class="row"><input id="extendPer10" type="number" min="0" step="1" placeholder="Segundos extra por cada 10 coins"></div>
+  <div class="row"><input id="streamDelay" type="number" min="0" step="1" placeholder="Delay del stream (s)"></div>
+  <div class="row"><button class="btn" onclick="save()">Guardar</button></div>
+  <div class="small" id="msg"></div>
+</div>
+
+<script>
+async function load(){
+  const r = await fetch("/api/config"); const cfg = await r.json();
+  auctionSeconds.value = cfg.auctionSeconds; extendPer10.value = cfg.extendPer10; streamDelay.value = cfg.streamDelay;
+}
+async function save(){
+  const body = { auctionSeconds: Number(auctionSeconds.value), extendPer10: Number(extendPer10.value), streamDelay: Number(streamDelay.value) };
+  await fetch("/api/config",{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify(body)});
+  msg.textContent = "✅ Config actualizada. El nuevo tiempo aplica en la siguiente ronda.";
+}
+load();
+</script>
+</body></html>
