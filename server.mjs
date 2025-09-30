@@ -1,4 +1,3 @@
-// --- al inicio:
 import express from "express";
 import http from "http";
 import { Server as SocketIOServer } from "socket.io";
@@ -6,7 +5,7 @@ import { WebcastPushConnection } from "tiktok-live-connector";
 
 const PORT = process.env.PORT || 3000;
 
-// Config “viva” editable desde /admin:
+// Config editable en runtime (también se inicializa desde Secrets de Fly)
 const config = {
   auctionSeconds: Number(process.env.AUCTION_SECONDS || 20),
   extendPer10:   Number(process.env.EXTEND_PER_10_COINS || 3),
@@ -15,21 +14,20 @@ const config = {
 };
 
 const app = express();
-app.use(express.json());           // <— para API /api/config
+app.use(express.json());
 app.use(express.static("public"));
 
 const server = http.createServer(app);
 const io = new SocketIOServer(server, { cors: { origin: "*" } });
 
-// --- estado de subasta:
+// ===== Estado de subasta
 let state = {
   round: 1,
   running: false,
   endsAt: null,
-  bidders: new Map(),
+  bidders: new Map(), // user -> { coins, lastGift }
 };
 
-// helpers
 function resetRound() {
   if (state.running) state.round += 1;
   state.running = true;
@@ -94,42 +92,39 @@ function onGift({ username, coins, raw = null }) {
   broadcast();
 }
 
-// --- rutas existentes:
-app.get("/gift", (req, res) => {
-  const u = req.query.user || "demo_user";
-  const c = Number(req.query.coins || 10);
-  onGift({ username: u, coins: c });
-  res.json({ ok: true });
+// ===== Rutas
+app.get("/", (req, res) => {
+  res.send("✅ TikTok Auction Overlay online | usa /overlay, /admin, /gift");
 });
 
 app.get("/overlay", (req, res) => {
   res.sendFile(process.cwd() + "/public/overlay.html");
 });
 
-// --- NUEVO: API de configuración runtime (/admin la usa)
-app.get("/api/config", (req, res) => res.json(config));
+app.get("/gift", (req, res) => {
+  const u = req.query.user || "viewer";
+  const c = Number(req.query.coins || 10);
+  onGift({ username: u, coins: c });
+  res.json({ ok: true });
+});
 
+// API de configuración runtime (la usa /admin)
+app.get("/api/config", (req, res) => res.json(config));
 app.post("/api/config", (req, res) => {
   const { auctionSeconds, extendPer10, streamDelay } = req.body || {};
   if (Number.isFinite(auctionSeconds) && auctionSeconds > 0) config.auctionSeconds = Math.floor(auctionSeconds);
   if (Number.isFinite(extendPer10)   && extendPer10   >= 0) config.extendPer10   = Math.floor(extendPer10);
   if (Number.isFinite(streamDelay)   && streamDelay   >= 0) config.streamDelay   = Math.floor(streamDelay);
-  // si la ronda está corriendo y cambias auctionSeconds, no reiniciamos; aplica en siguiente reset
   io.emit("config_updated", config);
   res.json({ ok: true, config });
 });
 
-// home bonito (opcional)
-app.get("/", (req, res) => {
-  res.send("✅ TikTok Auction Overlay online | usa /overlay, /admin, /gift");
-});
-
-// conexión a TikTok (igual que tenías, usando config.tiktokUser)
+// ===== Conexión a TikTok
 async function connectTikTok() {
   const tiktok = new WebcastPushConnection(config.tiktokUser, { enableExtendedGiftInfo: true });
 
-  tiktok.on("streamEnd", () => { console.log("🔴 Live finalizado. Reintento 15s"); setTimeout(connectTikTok, 15000); });
-  tiktok.on("disconnected", () => { console.log("⚠️ Desconectado. Reintento 10s"); setTimeout(connectTikTok, 10000); });
+  tiktok.on("streamEnd", () => { console.log("🔴 Live finalizado. Reintentando en 15s…"); setTimeout(connectTikTok, 15000); });
+  tiktok.on("disconnected", () => { console.log("⚠️ Desconectado. Reintento en 10s…"); setTimeout(connectTikTok, 10000); });
 
   tiktok.on("gift", (data) => {
     try {
@@ -137,8 +132,7 @@ async function connectTikTok() {
       let coins = 0;
       if (data?.giftType === 1) {
         if (!data?.repeatEnd) return;
-        if (data?.gift && typeof data?.repeatCount === "number")
-          coins = (data.gift.diamondCost || 0) * data.repeatCount;
+        if (data?.gift && typeof data?.repeatCount === "number") coins = (data.gift.diamondCost || 0) * data.repeatCount;
         else if (typeof data?.diamondCount === "number") coins = data.diamondCount;
       } else {
         if (typeof data?.diamondCount === "number" && data.diamondCount > 0) coins = data.diamondCount;
@@ -158,7 +152,7 @@ async function connectTikTok() {
 }
 
 server.listen(PORT, () => {
-  console.log(`Server running: http://localhost:${PORT}`);
+  console.log(`Server running on :${PORT}`);
   resetRound();
   connectTikTok();
 });
